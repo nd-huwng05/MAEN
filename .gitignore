@@ -1,0 +1,63 @@
+# ================================
+# Python cache & compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ================================
+# Virtual environment folders
+.env/
+.venv/
+env/
+venv/
+
+# ================================
+# IDE/editor settings
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# ================================
+# Model files & checkpoints
+*.pth
+*.pt
+*.ckpt
+*.h5
+models/pretrained/
+
+# ================================
+# Logs and TensorBoard
+*.log
+logs/
+tensorboard/
+
+# ================================
+# Output results
+results/
+reconstructions/
+anomaly_maps/
+*.png
+*.jpg
+*.jpeg
+
+# ================================
+# Datasets (local copies)
+data/raw/
+data/processed/
+data/splits/
+
+# ================================
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ================================
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# ================================
+# Backup and temp files
+*.tmp
+*.bak
+*.swp
