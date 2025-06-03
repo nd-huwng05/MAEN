@@ -43,9 +43,10 @@ anomaly_maps/
 
 # ================================
 # Datasets (local copies)
-data/raw/
-data/processed/
-data/splits/
+data/VinCXR/images
+data/RSNA/images
+data/LAG/images
+data/BrainTumor/images
 
 # ================================
 # Jupyter Notebook checkpoints
@@ -61,3 +62,14 @@ Thumbs.db
 *.tmp
 *.bak
 *.swp
+
+# Ignore image files
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.tiff
+*.gif
+*.svg
+
+
