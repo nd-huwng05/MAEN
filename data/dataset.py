@@ -3,7 +3,7 @@ import os.path
 
 from PIL import Image
 from torch.utils.data import Dataset
-from joblib import Parallel, delayed
+from torchvision import transforms
 
 import matplotlib.pyplot as plt
 import argparse
@@ -18,7 +18,10 @@ class MedicalImageDataset(Dataset):
         self.image_size = config["dataset"]["image_size"]
         self.images = []
         self.labels = []
-        self.transform = transform if transform is not None else lambda x:x
+        self.transform = transform if transform is not None else transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
 
         if not os.path.exists(self.json):
             raise FileNotFoundError(f"404 FILE NOT FOUND: {self.json}")
@@ -34,7 +37,7 @@ class MedicalImageDataset(Dataset):
             self.images += data
             self.labels += len(normal) * [0] + len(abnormal) * [1]
 
-        elif mode == "test":
+        elif mode == "inference":
             normal = self.img_name["test"]["0"]
             abnormal = self.img_name["test"]["1"]
             data = normal + abnormal
@@ -65,9 +68,11 @@ if __name__ == "__main__":
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    dataset = MedicalImageDataset(config, mode="test")
-    print(f"Sum images in dataset: {dataset.__len__()}")
-    image, label = dataset.__getitem__(0)
+    transforms = transforms.Compose([])
+
+    dataset = MedicalImageDataset(config, mode="train", transform=transforms)
+    print(f"Sum images in dataset: {len(dataset)}")
+    image, label = dataset[12]
     plt.imshow(image)
     plt.title(f"Label: {label}")
     plt.axis('off')

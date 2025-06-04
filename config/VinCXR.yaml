@@ -3,3 +3,12 @@ dataset:
   json: "VinCXR/data.json"
   image_size: 128
 
+train:
+  epoch: 100
+  batch_size: 32
+  num_model: 3
+  lr: 1.0e-3
+  lambda: 1
+
+
+
