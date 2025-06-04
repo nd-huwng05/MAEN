@@ -1,0 +1,5 @@
+dataset:
+  path: "VinCXR/images"
+  json: "VinCXR/data.json"
+  image_size: 64
+
