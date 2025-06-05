@@ -91,7 +91,7 @@ def train(config,args):
                     cls_tokens.append(cls_token)
                     attn_maps.append(attn_map)
                     x_recons.append(x_recon)
-        #cka
+        #loss
 
 
     total_time = time.time() - start_time
