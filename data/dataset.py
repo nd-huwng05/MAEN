@@ -1,5 +1,6 @@
 import json
 import os.path
+import random
 
 from PIL import Image
 from torch.utils.data import Dataset
@@ -10,7 +11,7 @@ import argparse
 import yaml
 
 class MedicalImageDataset(Dataset):
-    def __init__(self, config, mode='train', transform=None):
+    def __init__(self, config, mode='train',abnormal_ratio=0.12, transform=None):
         super(MedicalImageDataset, self).__init__()
         assert mode in ['train', 'test']
         self.path = config["dataset"]["path"]
@@ -18,7 +19,9 @@ class MedicalImageDataset(Dataset):
         self.image_size = config["dataset"]["image_size"]
         self.images = []
         self.labels = []
+        self.abnormal_ratio = abnormal_ratio
         self.transform = transform if transform is not None else transforms.Compose([
+            transforms.Resize(self.image_size),
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])
@@ -31,19 +34,21 @@ class MedicalImageDataset(Dataset):
 
         if mode == "train":
             normal = self.img_name["train"]["0"]
-            abnormal = self.img_name["train"]["1"]
-            data = normal + abnormal
+            normal = random.sample(normal,(int)(config["dataset"]["num_sample"]*(1 -self.abnormal_ratio)))
+            anomalies = self.img_name["train"]["1"]
+            anomalies = random.sample(anomalies,(int)(config["dataset"]["num_sample"]*self.abnormal_ratio))
+            data = normal + anomalies
 
             self.images += data
-            self.labels += len(normal) * [0] + len(abnormal) * [1]
+            self.labels += len(normal) * [0] + len(anomalies)*[1]
 
-        elif mode == "inference":
+        elif mode == "test":
             normal = self.img_name["test"]["0"]
-            abnormal = self.img_name["test"]["1"]
-            data = normal + abnormal
+            anomalies = self.img_name["test"]["1"]
+            data = normal + anomalies
 
             self.images += data
-            self.labels += len(normal) * [0] + len(abnormal) * [1]
+            self.labels += len(normal) * [0] + len(anomalies) * [1]
 
     def __getitem__(self, item):
         img_path = os.path.join(self.path, self.images[item])
@@ -68,9 +73,11 @@ if __name__ == "__main__":
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
+    config["dataset"]["json"] = "VinCXR/data.json"
+    config["dataset"]["path"] = "VinCXR/images"
     transforms = transforms.Compose([])
 
-    dataset = MedicalImageDataset(config, mode="train", transform=transforms)
+    dataset = MedicalImageDataset(config, mode="train", transform=transforms, abnormal_ratio=0.2)
     print(f"Sum images in dataset: {len(dataset)}")
     image, label = dataset[12]
     plt.imshow(image)

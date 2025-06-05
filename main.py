@@ -1,11 +1,14 @@
+from types import SimpleNamespace
+
 import yaml
 import os
 import argparse
-from scripts import run
+from scripts.train import train
+from scripts.inference import inference
 
 
 def load_config(args):
-    config_path = os.path.join('../config', f"{args.config}.yaml")
+    config_path = os.path.join('./config', f"{args.config}.yaml")
 
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"404 FILE NOT FOUND: {config_path}")
@@ -22,10 +25,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     config = load_config(args)
+
     if args.mode == 'train':
-        run.train(config, args)
+        args = argparse.Namespace()
+        args.train = SimpleNamespace(**config["train"])
+        train(config, args.train)
     elif args.mode == 'inference':
-        run.inference(config, args)
+        args = argparse.Namespace()
+        args.train = SimpleNamespace(**config["inference"])
+        inference(config)
 
 
 
