@@ -9,11 +9,12 @@ import torch.utils.data
 from timm.optim import optim_factory
 from timm.utils import NativeScaler
 from torch.utils.tensorboard import SummaryWriter
-
+from utils.losses import SimilarityLoss
 from data.dataset import MedicalImageDataset
 from utils import mics
 from utils import logger
-from models.maen import MAEN
+from models.model_test import VisionTransformer
+import torch.nn.functional as F
 
 
 def train(config,args):
@@ -53,7 +54,7 @@ def train(config,args):
         drop_last=False,
     )
 
-    models = [MAEN(config).to(device=args.device) for _ in range(args.num_model)]
+    models = [VisionTransformer().to(device=args.device) for _ in range(args.num_model)]
 
     print("actual lr: %.2e" % args.lr)
     param_groups = [optim_factory.param_groups_weight_decay(model, args.weight_decay) for model in models]
@@ -79,19 +80,36 @@ def train(config,args):
 
             cls_tokens = []
             attn_maps = []
+            feature_maps = []
             x_recons = []
 
             for i in range(args.num_model):
-                imgs, labels = images[i]
-                imgs = imgs.to(args.device)
+                latent, _ = images[i]
+                latent = latent.to(args.device)
                 models[i] = models[i].float()
 
                 with torch.cuda.amp.autocast(enabled=loss_scalers[i] is not None):
-                    cls_token, attn_map, x_recon = models[i](imgs)
+                    cls_token, attn_map, x_recon, feature_map = models[i](latent)
                     cls_tokens.append(cls_token)
                     attn_maps.append(attn_map)
                     x_recons.append(x_recon)
-        #loss
+                    feature_maps.append(feature_map)
+
+            for i in range(args.num_model):
+                latent, labels = images[i]
+                SimLoss = SimilarityLoss()
+                features_tuples = [[feature_map[i], feature_map[j]] for j in range(args.num_model) if j != i]
+                cls_token_tuples = [[cls_tokens[i], cls_tokens[j]] for j in range(args.num_model) if j != i]
+                attn_maps_tuples = [[attn_maps[i], attn_maps[j]] for j in range(args.num_model) if j != i]
+                loss = [sum(SimLoss(features=features_tuples[idx],
+                                    cls_tokens=cls_token_tuples[idx],
+                                    attentions=attn_maps_tuples[idx])) for idx in range(args.num_model - 1)]
+                recon_loss = F.mse_loss(x_recons[i],latent)
+                L_total = sum(loss) + recon_loss
+
+                optimizers[i].zero_grad()
+                L_total.backward()
+                optimizers[i].step()
 
 
     total_time = time.time() - start_time
