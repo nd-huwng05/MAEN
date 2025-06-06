@@ -79,46 +79,40 @@ class Cosine:
 
 
 class SimilarityLoss:
-    def __init__(self, alpha=0.7, beta=0.3, lambda_f=0.7, lambda_a=0.2, lambda_c=0.1):
+    def __init__(self, alpha=0.7, beta=0.3, lambda_f=0.8, lambda_a=0.2, device='cpu', idx=0):
         self.alpha = alpha
         self.beta = beta
         self.lambda_f = lambda_f
         self.lambda_a = lambda_a
-        self.lambda_c = lambda_c
+
+        self.idx = idx
+        self.cka = CKA(device=device)
+        self.mmd = MMD()
 
     def feature_level_loss(self, features):
         n = len(features)
         loss = 0
-        for j in range(n - 1):
+        for j in range(self.idx + 1, n):
             h_j = features[j]
-            h_n = features[-1]
-            cka_loss = CKA.linear(h_j, h_n)
-            mmd_loss = 1 - MMD.compute(h_j, h_n)
+            h_n = features[self.idx]
+            cka_loss = self.cka(h_j.float(), h_n.float())
+            mmd_loss = 1 - self.mmd.compute(h_j, h_n)
             loss += self.alpha * cka_loss + self.beta * mmd_loss
-        return loss / (n - 1)
+        return loss
 
     def attention_level_loss(self, attentions):
         n = len(attentions)
         loss = 0
-        for j in range(n - 1):
+        for j in range(self.idx +1, n):
             A_j = attentions[j].mean(dim=0).flatten()
-            A_n = attentions[-1].mean(dim=0).flatten()
-            loss += Cosine.distance(A_j, A_n)
-        return loss / (n - 1)
-
-    def context_level_loss(self, cls_tokens):
-        Ej = torch.stack(cls_tokens[:-1])  # Stack các cls tokens trừ cái cuối: shape (n-1, D)
-        Ej = Ej.mean(dim=0)  # Trung bình: shape (D,)
-        En = cls_tokens[-1]  # Mẫu chuẩn: shape (D,)
-
-        loss = CKA.compute(Ej.unsqueeze(0), En.unsqueeze(0))  # Thêm batch dim -> shape (1, D)
+            A_n = attentions[self.idx].mean(dim=0).flatten()
+            loss += Cosine.distance(A_j.float(), A_n.float())
         return loss
 
-    def __call__(self, features, attentions, cls_tokens):
+    def __call__(self, features, attentions):
         loss_f = self.feature_level_loss(features)
         loss_a = self.attention_level_loss(attentions)
-        loss_c = self.context_level_loss(cls_tokens)
 
-        total_loss = self.lambda_f * loss_f + self.lambda_a * loss_a + self.lambda_c * loss_c
+        total_loss = self.lambda_f * loss_f + self.lambda_a * loss_a
         return total_loss
 

@@ -5,8 +5,8 @@ dataset:
   num_sample: 9600
 
 train:
-  epochs: 100
-  batch_size: 32
+  epochs: 32
+  batch_size: 256
   num_model: 3
   ratio_abnormal: 0.2
   lr: 1.0e-3
@@ -16,6 +16,7 @@ train:
   num_workers: 1
   pin_mem: False
   device: "cuda"
+  print_freq: 10
   resume: False
 
 inference:

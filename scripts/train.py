@@ -5,7 +5,6 @@ import time
 import datetime
 
 import torch.utils.data
-
 from timm.optim import optim_factory
 from timm.utils import NativeScaler
 from torch.utils.tensorboard import SummaryWriter
@@ -13,6 +12,7 @@ from utils.losses import SimilarityLoss
 from data.dataset import MedicalImageDataset
 from utils import mics
 from utils import logger
+from utils.logger import SmoothedValue
 from models.model_test import VisionTransformer
 import torch.nn.functional as F
 
@@ -42,6 +42,7 @@ def train(config,args):
             drop_last=False,
         )
         dataloader_train.append(dataloader)
+    num_batches = len(dataloader_train[0])
 
     print(f"Load dataset test...")
     dataset_test = MedicalImageDataset(config, mode="test")
@@ -72,44 +73,64 @@ def train(config,args):
             model.train()
 
         metric_logger = logger.MetricLogger(delimiter="  ")
+        metric_logger.add_meter('L_sim', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
+        metric_logger.add_meter('L_org', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
+        metric_logger.add_meter('L_total', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
         header = 'Epoch: [{}]'.format(epoch)
 
-        for images in zip(*dataloader_train):
-            for optimizer in optimizers:
-                optimizer.zero_grad()
+        iters = [iter(dl) for dl in dataloader_train]
+        for batch_idx, _ in enumerate(metric_logger.log_every(range(num_batches), args.print_freq, header)):
 
-            cls_tokens = []
+            images = [next(it) for it in iters]
+            for opt in optimizers:
+                opt.zero_grad()
+
             attn_maps = []
             feature_maps = []
             x_recons = []
+            latents = []
 
             for i in range(args.num_model):
                 latent, _ = images[i]
                 latent = latent.to(args.device)
-                models[i] = models[i].float()
+                latents.append(latent)
 
-                with torch.cuda.amp.autocast(enabled=loss_scalers[i] is not None):
-                    cls_token, attn_map, x_recon, feature_map = models[i](latent)
-                    cls_tokens.append(cls_token)
+                models[i] = models[i].float()
+                with torch.amp.autocast(device_type='cuda', enabled=loss_scalers[i] is not None):
+                    attn_map, x_recon, feature_map = models[i](latent)
+
                     attn_maps.append(attn_map)
                     x_recons.append(x_recon)
                     feature_maps.append(feature_map)
 
-            for i in range(args.num_model):
-                latent, labels = images[i]
-                SimLoss = SimilarityLoss()
-                features_tuples = [[feature_map[i], feature_map[j]] for j in range(args.num_model) if j != i]
-                cls_token_tuples = [[cls_tokens[i], cls_tokens[j]] for j in range(args.num_model) if j != i]
-                attn_maps_tuples = [[attn_maps[i], attn_maps[j]] for j in range(args.num_model) if j != i]
-                loss = [sum(SimLoss(features=features_tuples[idx],
-                                    cls_tokens=cls_token_tuples[idx],
-                                    attentions=attn_maps_tuples[idx])) for idx in range(args.num_model - 1)]
-                recon_loss = F.mse_loss(x_recons[i],latent)
-                L_total = sum(loss) + recon_loss
+            feature_pooled = [fm.mean(dim=(2, 3)) for fm in feature_maps]
 
-                optimizers[i].zero_grad()
-                L_total.backward()
-                optimizers[i].step()
+            L_sim = 0.0
+            for i in range(args.num_model):
+                sim_loss_fn = SimilarityLoss(device=args.device, idx=i)
+                L_sim += sim_loss_fn(
+                    features=feature_pooled,
+                    attentions=attn_maps
+                )
+
+            L_org = 0.0
+            for i in range(args.num_model):
+                latent = latents[i]
+                recon = x_recons[i].to(latent.device)
+                L_org += F.mse_loss(recon, latent.to(recon.dtype))
+
+            L_total = L_sim + L_org
+
+            metric_logger.update(
+                L_sim=L_sim.item(),
+                L_org=L_org.item(),
+                L_total=L_total.item()
+            )
+
+            L_total.backward()
+            for opt in optimizers:
+                opt.step()
+
 
 
     total_time = time.time() - start_time

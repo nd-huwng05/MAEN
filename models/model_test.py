@@ -14,7 +14,7 @@ class VisionTransformer(nn.Module):
         self.num_patches = self.num_patches_per_dim ** 2
 
         # Patch embedding: Conv2d chia ảnh thành patch và nhúng vào không gian D
-        self.patch_embed = nn.Conv2d(in_channels=3, out_channels=embed_dim,
+        self.patch_embed = nn.Conv2d(in_channels=1, out_channels=embed_dim,
                                      kernel_size=patch_size, stride=patch_size)
 
         # CLS token và Positional Encoding
@@ -27,8 +27,8 @@ class VisionTransformer(nn.Module):
 
         # Decoder: tái tạo lại patch -> ảnh
         self.decoder = nn.Sequential(
-            nn.Linear(embed_dim, patch_size * patch_size * 3),
-            nn.Unflatten(1, (3, patch_size, patch_size))
+            nn.Linear(embed_dim, patch_size * patch_size * 1),
+            nn.Unflatten(1, (1, patch_size, patch_size))
         )
 
     def forward_encoder(self, x):
@@ -68,13 +68,13 @@ class VisionTransformer(nn.Module):
         x = self.decoder(x)                                   # [B*T, 3, P, P]
 
         # Gộp lại thành ảnh
-        patch_recon = x.view(B, side, side, 3, self.patch_size, self.patch_size)  # [B, H, W, C, P, P]
-        patch_recon = patch_recon.permute(0, 3, 1, 4, 2, 5).contiguous()           # [B, C, H, P, W, P]
-        x_recon = patch_recon.view(B, 3, self.img_size, self.img_size)            # [B, 3, H', W']
+        patch_recon = x.view(B, side, side, 1, self.patch_size, self.patch_size)  # [B, H, W, C=1, P, P]
+        patch_recon = patch_recon.permute(0, 3, 1, 4, 2, 5).contiguous()  # [B, 1, H, P, W, P]
+        x_recon = patch_recon.view(B, 1, self.img_size, self.img_size)  # [B, 1, H, W]
 
         return x_recon
 
     def forward(self, x):
         cls_token, patch_tokens, attn_map, feature_map = self.forward_encoder(x)
         x_recon = self.forward_decoder(patch_tokens)
-        return cls_token, attn_map, x_recon, feature_map
+        return attn_map, x_recon, feature_map
