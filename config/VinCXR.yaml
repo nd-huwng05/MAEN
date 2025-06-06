@@ -5,15 +5,15 @@ dataset:
   num_sample: 9600
 
 train:
-  epochs: 32
-  batch_size: 256
+  epochs: 100
+  batch_size: 128
   num_model: 3
   ratio_abnormal: 0.2
   lr: 1.0e-3
   lambda: 1
   output: "./logs"
   weight_decay: 0.05
-  num_workers: 1
+  num_workers: 0
   pin_mem: False
   device: "cuda"
   print_freq: 10

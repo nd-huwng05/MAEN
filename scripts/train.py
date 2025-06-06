@@ -3,18 +3,14 @@ import random
 import os
 import time
 import datetime
-
 import torch.utils.data
 from timm.optim import optim_factory
 from timm.utils import NativeScaler
 from torch.utils.tensorboard import SummaryWriter
-from utils.losses import SimilarityLoss
 from data.dataset import MedicalImageDataset
 from utils import mics
-from utils import logger
-from utils.logger import SmoothedValue
 from models.model_test import VisionTransformer
-import torch.nn.functional as F
+from utils.engine import train_one_epoch,test_one_epoch
 
 
 def train(config,args):
@@ -42,7 +38,6 @@ def train(config,args):
             drop_last=False,
         )
         dataloader_train.append(dataloader)
-    num_batches = len(dataloader_train[0])
 
     print(f"Load dataset test...")
     dataset_test = MedicalImageDataset(config, mode="test")
@@ -61,77 +56,30 @@ def train(config,args):
     param_groups = [optim_factory.param_groups_weight_decay(model, args.weight_decay) for model in models]
     optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.9, 0.95)) for param_group in param_groups]
     print(optimizers)
-    loss_scalers = [NativeScaler for _ in range(args.num_model)]
-    best_auc = 0
+    loss_scalers = [NativeScaler() for _ in range(args.num_model)]
+    auc_best = 0
+    start = 0
     if args.resume:
         start, auc_best = mics.load_model(args, models, optimizers, loss_scalers, best=False)
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
 
-    for epoch in range(args.epochs):
-        for model in models:
-            model.train()
+    for epoch in range(start, args.epochs):
+        train_stats = train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, epoch, log_writer)
+        log_writer.add_scalars("Train/Losses", {
+            "L_sim": train_stats["L_sim"],
+            "L_org": train_stats["L_org"],
+            "L_total": train_stats["L_total"],
+        }, epoch)
 
-        metric_logger = logger.MetricLogger(delimiter="  ")
-        metric_logger.add_meter('L_sim', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
-        metric_logger.add_meter('L_org', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
-        metric_logger.add_meter('L_total', SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
-        header = 'Epoch: [{}]'.format(epoch)
+        test_stats = test_one_epoch(models, dataloader_test, args, epoch, log_writer)
+        log_writer.add_scalar("Test/AUC", test_stats["AUC"], epoch)
+        log_writer.add_scalar("Test/AP", test_stats["AP"], epoch)
 
-        iters = [iter(dl) for dl in dataloader_train]
-        for batch_idx, _ in enumerate(metric_logger.log_every(range(num_batches), args.print_freq, header)):
-
-            images = [next(it) for it in iters]
-            for opt in optimizers:
-                opt.zero_grad()
-
-            attn_maps = []
-            feature_maps = []
-            x_recons = []
-            latents = []
-
-            for i in range(args.num_model):
-                latent, _ = images[i]
-                latent = latent.to(args.device)
-                latents.append(latent)
-
-                models[i] = models[i].float()
-                with torch.amp.autocast(device_type='cuda', enabled=loss_scalers[i] is not None):
-                    attn_map, x_recon, feature_map = models[i](latent)
-
-                    attn_maps.append(attn_map)
-                    x_recons.append(x_recon)
-                    feature_maps.append(feature_map)
-
-            feature_pooled = [fm.mean(dim=(2, 3)) for fm in feature_maps]
-
-            L_sim = 0.0
-            for i in range(args.num_model):
-                sim_loss_fn = SimilarityLoss(device=args.device, idx=i)
-                L_sim += sim_loss_fn(
-                    features=feature_pooled,
-                    attentions=attn_maps
-                )
-
-            L_org = 0.0
-            for i in range(args.num_model):
-                latent = latents[i]
-                recon = x_recons[i].to(latent.device)
-                L_org += F.mse_loss(recon, latent.to(recon.dtype))
-
-            L_total = L_sim + L_org
-
-            metric_logger.update(
-                L_sim=L_sim.item(),
-                L_org=L_org.item(),
-                L_total=L_total.item()
-            )
-
-            L_total.backward()
-            for opt in optimizers:
-                opt.step()
-
-
+        if auc_best < test_stats["AUC"]:
+            auc_best = test_stats["AUC"]
+            mics.save_model(args, epoch, models, optimizers, loss_scalers, auc_best, best=True)
+        mics.save_model(args,epoch,models,optimizers,loss_scalers, auc_best, best=False)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
