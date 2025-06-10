@@ -33,7 +33,7 @@ if __name__ == "__main__":
     elif args.mode == 'inference':
         args = argparse.Namespace()
         args.train = SimpleNamespace(**config["inference"])
-        inference(config)
+        inference(config, args.train)
 
 
 

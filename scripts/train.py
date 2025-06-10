@@ -23,21 +23,17 @@ def train(config,args):
     selected = max(1, math.ceil(args.num_model * args.ratio_abnormal))
     selected = random.sample(range(args.num_model),selected)
 
-    dataloader_train = []
-    for k in range(args.num_model):
-        print(f"Load dataset train for junior {k}")
-        abnormal_ratio = 0.2 if k in selected else 0
-        dataset = MedicalImageDataset(config, mode="train", abnormal_ratio=abnormal_ratio)
-        sampler_train = torch.utils.data.RandomSampler(dataset)
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size= args.batch_size,
-            sampler=sampler_train,
-            num_workers=args.num_workers,
-            pin_memory=args.pin_mem,
-            drop_last=False,
-        )
-        dataloader_train.append(dataloader)
+    print(f"Load dataset train...")
+    dataset = MedicalImageDataset(config, mode="train")
+    sampler_train = torch.utils.data.RandomSampler(dataset)
+    dataloader_train = torch.utils.data.DataLoader(
+        dataset,
+        batch_size= args.batch_size,
+        sampler=sampler_train,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+        drop_last=False,
+    )
 
     print(f"Load dataset test...")
     dataset_test = MedicalImageDataset(config, mode="test")

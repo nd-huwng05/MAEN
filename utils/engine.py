@@ -14,11 +14,7 @@ def train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, ep
     metric_logger.add_meter('L_total', logger.SmoothedValue(window_size=20, fmt='{median:.4f} ({global_avg:.4f})'))
     header = 'Epoch: [{}]'.format(epoch)
 
-    num_batches = len(dataloader_train[0])
-    iters = [iter(dl) for dl in dataloader_train]
-    for batch_idx, _ in enumerate(metric_logger.log_every(range(num_batches), args.print_freq, header)):
-
-        images = [next(it) for it in iters]
+    for images, _ in metric_logger.log_every(dataloader_train, args.print_freq, header):
         for opt in optimizers:
             opt.zero_grad()
 
@@ -28,9 +24,8 @@ def train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, ep
         latents = []
 
         for i in range(args.num_model):
-            latent, _ = images[i]
+            latent = images
             latent = latent.to(args.device)
-            latents.append(latent)
 
             models[i] = models[i].float()
             with torch.amp.autocast(device_type='cuda', enabled=loss_scalers[i] is not None):
