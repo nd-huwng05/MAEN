@@ -11,7 +11,7 @@ import argparse
 import yaml
 
 class MedicalImageDataset(Dataset):
-    def __init__(self, config, mode='train',abnormal_ratio=0.12, transform=None):
+    def __init__(self, config, mode='train', transform=None):
         super(MedicalImageDataset, self).__init__()
         assert mode in ['train', 'test']
         self.path = config["dataset"]["path"]
@@ -19,7 +19,6 @@ class MedicalImageDataset(Dataset):
         self.image_size = config["dataset"]["image_size"]
         self.images = []
         self.labels = []
-        self.abnormal_ratio = abnormal_ratio
         self.transform = transform if transform is not None else transforms.Compose([
             transforms.Resize(self.image_size),
             transforms.ToTensor(),
@@ -34,13 +33,8 @@ class MedicalImageDataset(Dataset):
 
         if mode == "train":
             normal = self.img_name["train"]["0"]
-            normal = random.sample(normal,(int)(config["dataset"]["num_sample"]*(1 -self.abnormal_ratio)))
-            anomalies = self.img_name["train"]["1"]
-            anomalies = random.sample(anomalies,(int)(config["dataset"]["num_sample"]*self.abnormal_ratio))
-            data = normal + anomalies
-
-            self.images += data
-            self.labels += len(normal) * [0] + len(anomalies)*[1]
+            self.images += normal
+            self.labels += len(normal) * [0]
 
         elif mode == "test":
             normal = self.img_name["test"]["0"]
