@@ -1,5 +1,5 @@
 from models.ae import AE
-from models.base_units.blocks import BasicBlock, ResBlock
+from models.base.blocks import BasicBlock, ResBlock
 
 
 class AEU(AE):

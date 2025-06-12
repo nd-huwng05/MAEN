@@ -1,5 +1,5 @@
 import torch.nn as nn
-from models.base_units.blocks import BasicBlock, BottleNeck,ResBlock
+from models.base.blocks import BasicBlock, BottleNeck,ResBlock
 
 
 class AE(nn.Module):
@@ -16,25 +16,16 @@ class AE(nn.Module):
             de_num_layers = 1
 
         self.en_block1 = block(in_planes, 1 * base_width * expansion, en_num_layers, downsample=True)
+        self.en_block2 = block(1 * base_width * expansion, 2 * base_width * expansion, en_num_layers, downsample=True)
+        self.en_block3 = block(2 * base_width * expansion, 4 * base_width * expansion, en_num_layers, downsample=True)
+        self.en_block4 = block(4 * base_width * expansion, 4 * base_width * expansion, en_num_layers, downsample=True)
 
-        self.en_block2 = block(1 * base_width * expansion, 2 * base_width * expansion, en_num_layers,
-                                    downsample=True)
-        self.en_block3 = block(2 * base_width * expansion, 4 * base_width * expansion, en_num_layers,
-                                    downsample=True)
-        self.en_block4 = block(4 * base_width * expansion, 4 * base_width * expansion, en_num_layers,
-                                    downsample=True)
+        self.bottle_neck = BottleNeck(4 * base_width * expansion, feature_size=self.fm, mid_num=mid_num,latent_size=latent_size)
 
-        self.bottle_neck = BottleNeck(4 * base_width * expansion, feature_size=self.fm, mid_num=mid_num,
-                                      latent_size=latent_size)
-
-        self.de_block1 = block(4 * base_width * expansion, 4 * base_width * expansion, de_num_layers,
-                                    upsample=True)
-        self.de_block2 = block(4 * base_width * expansion, 2 * base_width * expansion, de_num_layers,
-                                    upsample=True)
-        self.de_block3 = block(2 * base_width * expansion, 1 * base_width * expansion, de_num_layers,
-                                    upsample=True)
-        self.de_block4 = block(1 * base_width * expansion, in_planes, de_num_layers, upsample=True,
-                                    last_layer=True)
+        self.de_block1 = block(4 * base_width * expansion, 4 * base_width * expansion, de_num_layers, upsample=True)
+        self.de_block2 = block(4 * base_width * expansion, 2 * base_width * expansion, de_num_layers, upsample=True)
+        self.de_block3 = block(2 * base_width * expansion, 1 * base_width * expansion, de_num_layers, upsample=True)
+        self.de_block4 = block(1 * base_width * expansion, in_planes, de_num_layers, upsample=True, last_layer=True)
 
     def forward(self, x):
         en1 = self.en_block1(x)
