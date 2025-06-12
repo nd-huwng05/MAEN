@@ -11,6 +11,7 @@ class CKA(object):
         unit = torch.ones([n, n], device=self.device)
         I = torch.eye(n, device=self.device)
         H = I - unit / n
+        H = H.to(K.dtype)
         return H @ K @ H
 
     def rbf(self, X, sigma=None):
@@ -60,25 +61,39 @@ class ReconstructionLoss(nn.Module):
 
 
 class MAENLoss(nn.Module):
-    def __init__(self, args=None):
+    def __init__(self, alpha=1, beta=1, gamma=1 ,args=None):
         super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+
         self.cka = CKA()
         self.recon = ReconstructionLoss()
 
     def sim(self, features):
         loss = 0
+        count = 0
         for idx in range(len(features)):
             for i in range(idx + 1, len(features)):
                 loss += self.cka.forward(features[idx], features[i])
-        return loss
+                count += 1
+        return loss/count
 
-    def rec_loss(self, image, recs):
+    def rec_loss(self, image, recs, log_vars):
         loss = 0
         for i in range(len(recs)):
-            loss += self.recon(image, recs[i])
+            rec = self.recon(image, recs[i])
+            loss += torch.mean(torch.exp(-log_vars[i] * rec))
         return loss
 
-    def forward(self, x_recons, features, image):
+    def log_loss(self, log_vars):
+        loss = 0
+        for i in range(len(log_vars)):
+            loss += torch.mean(log_vars[i])
+        return loss
+
+    def forward(self, x_recons, features, image, log_vars):
         L_sim = self.sim(features)
-        L_rec = self.rec_loss(image, x_recons)
-        return L_sim + L_rec
+        L_rec = self.rec_loss(image, x_recons, log_vars)
+        L_log = self.log_loss(log_vars)
+        return L_sim, L_rec, L_sim*self.alpha + L_rec*self.beta + L_log*self.gamma

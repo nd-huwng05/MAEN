@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from models.base_units.conv_layers import down_conv, up_conv, conv3x3
-from models.base_units.memory_module import MemModule
+from models.base.conv_layers import down_conv, up_conv, conv3x3
+from models.base.memory_module import MemModule
 
 
 class BasicBlock(nn.Module):

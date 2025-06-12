@@ -9,7 +9,7 @@ from timm.utils import NativeScaler
 from torch.utils.tensorboard import SummaryWriter
 from data.dataset import MedicalImageDataset
 from utils import mics
-from models.model_test import VisionTransformer
+from models.aeu import AEU
 from utils.engine import train_one_epoch,test_one_epoch
 
 
@@ -19,9 +19,6 @@ def train(config,args):
     tensorboard_dir = os.path.join(args.output, "tensorboard/")
     os.makedirs(tensorboard_dir, exist_ok=True)
     log_writer = SummaryWriter(log_dir=tensorboard_dir)
-
-    selected = max(1, math.ceil(args.num_model * args.ratio_abnormal))
-    selected = random.sample(range(args.num_model),selected)
 
     print(f"Load dataset train...")
     dataset = MedicalImageDataset(config, mode="train")
@@ -46,11 +43,10 @@ def train(config,args):
         drop_last=False,
     )
 
-    models = [VisionTransformer().to(device=args.device) for _ in range(args.num_model)]
-
+    models = [AEU(latent_size=args.ls, expansion=args.mp, input_size=args.image_size, layer=args.layer).to(device=args.device) for _ in range(args.num_model)]
     print("actual lr: %.2e" % args.lr)
     param_groups = [optim_factory.param_groups_weight_decay(model, args.weight_decay) for model in models]
-    optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.9, 0.95)) for param_group in param_groups]
+    optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.5, 0.999)) for param_group in param_groups]
     print(optimizers)
     loss_scalers = [NativeScaler() for _ in range(args.num_model)]
     auc_best = 0
@@ -69,12 +65,13 @@ def train(config,args):
         }, epoch)
 
         test_stats = test_one_epoch(models, dataloader_test, args, epoch, log_writer)
-        log_writer.add_scalar("Test/AUC", test_stats["AUC"], epoch)
-        log_writer.add_scalar("Test/AP", test_stats["AP"], epoch)
+        log_writer.add_scalars("Test/AUC", {f"Model_{i}": auc for i, auc in enumerate(test_stats["AUC"])}, epoch)
+        log_writer.add_scalars("Test/AP", {f"Model_{i}": ap for i, ap in enumerate(test_stats["AP"])}, epoch)
 
-        if auc_best < test_stats["AUC"]:
-            auc_best = test_stats["AUC"]
-            mics.save_model(args, epoch, models, optimizers, loss_scalers, auc_best, best=True)
+        auc_old = auc_best.copy()
+        auc_best = [max(auc_best[i], test_stats['AUC'][i]) for i in range(args.num_model)]
+        if auc_old != auc_best:
+            mics.save_model(args, epoch, models, optimizers, loss_scalers, auc_best=auc_best, auc_old=auc_old, best=True)
         mics.save_model(args,epoch,models,optimizers,loss_scalers, auc_best, best=False)
 
     total_time = time.time() - start_time

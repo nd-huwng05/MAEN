@@ -1,8 +1,8 @@
+import numpy as np
 from sklearn.metrics import roc_auc_score, average_precision_score
 from utils import logger
 import torch
-import torch.nn.functional as F
-from utils.losses import SimilarityLoss
+from utils.losses import MAENLoss
 
 def train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, epoch, log_writer):
     for model in models:
@@ -18,46 +18,26 @@ def train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, ep
         for opt in optimizers:
             opt.zero_grad()
 
-        attn_maps = []
-        feature_maps = []
+        features = []
         x_recons = []
-        latents = []
+        log_vars = []
+
+        latents = images
+        latents = latents.to(args.device)
+        latents.requires_grad = True
 
         for i in range(args.num_model):
-            latent = images
-            latent = latent.to(args.device)
-
-            models[i] = models[i].float()
             with torch.amp.autocast(device_type='cuda', enabled=loss_scalers[i] is not None):
-                attn_map, x_recon, feature_map = models[i](latent)
+                output = models[i](latents)
+                features.append(output['features'])
+                x_recons.append(output['x_hat'])
+                log_vars.append(output['log_var'])
 
-                attn_maps.append(attn_map)
-                x_recons.append(x_recon)
-                feature_maps.append(feature_map)
-
-        feature_pooled = [fm.mean(dim=(2, 3)) for fm in feature_maps]
-
-        L_sim = 0.0
-        for i in range(args.num_model):
-            sim_loss_fn = SimilarityLoss(device=args.device, idx=i)
-            L_sim += sim_loss_fn(
-                features=feature_pooled,
-                attentions=attn_maps
-            )
-
-        L_org = 0.0
-        for i in range(args.num_model):
-            latent = latents[i]
-            recon = x_recons[i].to(latent.device)
-            L_org += F.mse_loss(recon, latent.to(recon.dtype))
-
-        L_total = L_sim + L_org
-
-        metric_logger.update(
-            L_sim=L_sim.item(),
-            L_org=L_org.item(),
-            L_total=L_total.item()
-        )
+        loss = MAENLoss(alpha=1, beta=1, gamma=1)
+        L_sim, L_org, L_total = loss(x_recons, features, latents, log_vars)
+        for opt in optimizers:
+            opt.zero_grad()
+        metric_logger.update(L_sim=L_sim.item(), L_org=L_org.item(), L_total=L_total.item())
 
         L_total.backward()
         for opt in optimizers:
@@ -73,59 +53,34 @@ def test_one_epoch(models, dataloader_test, args, epoch, log_writer):
     metric_logger = logger.MetricLogger(delimiter="  ")
     header = 'Testing epoch: [{}]'.format(epoch)
 
-    all_targets = []
-    all_scores = []
-    for images, targets in metric_logger.log_every(dataloader_test, args.print_freq, header):
-        images = images.to(args.device)
-        targets = targets.to(args.device)
+    with torch.no_grad():
+        for images, label in metric_logger.log_every(dataloader_test, args.print_freq, header):
+            x = images.to(args.device)
+            y_scores, y_trues = [], []
 
-        batch_scores = []
+            for i in range(args.num_model):
+                output  = models[i](x)
+                x_hat, log_var = output['x_hat'], output['log_var']
+                rec_err = (x_hat - x)**2
+                res = torch.exp(-log_var)*rec_err
+                res = res.mean(dim=(1,2,3))
 
-        for model in models:
-            images.requires_grad = True
-            attn_map, x_recon, feature_map = model(images)
+                y_trues[i].append(label.cpu())
+                y_scores[i].append(res.cpu().view(-1))
 
-            rec_error = F.mse_loss(x_recon, images, reduction='none')
-            rec_error_pixel = rec_error.mean(dim=1, keepdim=True)
+        y_trues = [np.concatenate(y_true) for y_true in y_trues]
+        y_scores = [np.concatenate(y_scores) for y_scores in y_scores]
+        aucs = [roc_auc_score(y_trues[i], y_scores[i]) for i in range(args.num_model)]
+        aps = [average_precision_score(y_trues[i], y_scores[i]) for i in range(args.num_model)]
 
-            loss = rec_error_pixel.mean()
-            grads = torch.autograd.grad(outputs=loss, inputs=images, retain_graph=True, create_graph=False, only_inputs=True)[0]
-            grads_pixel = grads.abs().mean(dim=1, keepdim=True)
-
-            if attn_map.shape[-2:] != rec_error_pixel.shape[-2:]:
-                attn_map = F.interpolate(attn_map, size=rec_error_pixel.shape[-2:], mode='bilinear')
-
-            attn_map = attn_map.to(args.device)
-            grads_pixel = grads_pixel.to(args.device)
-            rec_error_pixel = rec_error_pixel.to(args.device)
-
-            anomaly_map = attn_map * grads_pixel * rec_error_pixel
-            score_per_image = anomaly_map.flatten(1).mean(dim=1)
-            batch_scores.append(score_per_image.detach().cpu())
-
-            del attn_map, x_recon, feature_map, rec_error, rec_error_pixel, loss
-            del grads, grads_pixel, anomaly_map, score_per_image
-            torch.cuda.empty_cache()
-
-        final_score = torch.stack(batch_scores, dim=0).mean(dim=0)
-        all_targets.append(targets.detach().cpu())
-        all_scores.append(final_score.detach().cpu())
-
-        del images, targets, batch_scores, final_score
-        torch.cuda.empty_cache()
-
-    all_targets = torch.cat(all_targets).cpu().numpy()
-    all_scores = torch.cat(all_scores).cpu().numpy()
-
-    auc = roc_auc_score(all_targets, all_scores)
-    ap = average_precision_score(all_targets, all_scores)
-
-    metric_logger.update(AUC=auc, AP=ap)
-    metric_logger.synchronize_between_processes()
+        auc_dict = {f"AUC_model_{i}": aucs[i] for i in range(args.num_model)}
+        ap_dict = {f"AP_model_{i}": aps[i] for i in range(args.num_model)}
+        metric_logger.update(**auc_dict, **ap_dict)
+        metric_logger.synchronize_between_processes()
 
     print("Averaged stats:", metric_logger)
     return {
         **{k: meter.global_avg for k, meter in metric_logger.meters.items()},
-        "AUC": auc,
-        "AP": ap
+        "AUC": aucs,
+        "AP": aps,
     }
