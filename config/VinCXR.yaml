@@ -1,21 +1,21 @@
 dataset:
   path: "./data/VinCXR/images"
   json: "./data/VinCXR/data.json"
-  image_size: 128
+  image_size: 64
 
 train:
   epochs: 100
-  batch_size: 16
+  batch_size: 256
   num_model: 3
-  lr: 1.0e-3
+  lr: 1.0e-4
   ls: 16
   mp: 1
-  image_size: 128
+  image_size: 64
   layer: 4
   lambda: 1
   output: "./logs"
-  weight_decay: 0.05
-  num_workers: 0
+  weight_decay: 0
+  num_workers: 5
   pin_mem: False
   device: "cuda"
   print_freq: 10

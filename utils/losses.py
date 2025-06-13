@@ -8,10 +8,9 @@ class CKA(object):
 
     def centering(self, K):
         n = K.shape[0]
-        unit = torch.ones([n, n], device=self.device)
-        I = torch.eye(n, device=self.device)
+        unit = torch.ones([n, n], device=self.device, dtype=K.dtype)
+        I = torch.eye(n, device=self.device, dtype=K.dtype)
         H = I - unit / n
-        H = H.to(K.dtype)
         return H @ K @ H
 
     def rbf(self, X, sigma=None):
@@ -20,7 +19,7 @@ class CKA(object):
         KX = KX + KX.T
         if sigma is None:
             mdist = torch.median(KX[KX != 0])
-            sigma = math.sqrt(mdist.item())
+            sigma = mdist.sqrt()
         KX = -0.5 * KX / (sigma * sigma)
         return torch.exp(KX)
 
@@ -48,7 +47,6 @@ class CKA(object):
         return hsic / (var1 * var2)
 
     def forward(self, X, Y):
-        # Flatten to (batch, feature_dim)
         return self.linear_CKA(X.flatten(1), Y.flatten(1))
 
 
@@ -57,7 +55,7 @@ class ReconstructionLoss(nn.Module):
         super().__init__()
 
     def forward(self, Y, Y_rec):
-        return (Y - Y_rec).pow(2).mean()
+        return torch.mean((Y - Y_rec) ** 2)
 
 
 class MAENLoss(nn.Module):
@@ -71,13 +69,11 @@ class MAENLoss(nn.Module):
         self.recon = ReconstructionLoss()
 
     def sim(self, features):
-        loss = 0
-        count = 0
+        loss = []
         for idx in range(len(features)):
             for i in range(idx + 1, len(features)):
-                loss += self.cka.forward(features[idx], features[i])
-                count += 1
-        return loss/count
+                loss.append(self.cka.forward(features[idx], features[i]))
+        return torch.mean(torch.stack(loss), dim=0)
 
     def rec_loss(self, image, recs, log_vars):
         loss = 0

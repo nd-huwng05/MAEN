@@ -1,5 +1,3 @@
-import math
-import random
 import os
 import time
 import datetime
@@ -8,7 +6,7 @@ from timm.optim import optim_factory
 from timm.utils import NativeScaler
 from torch.utils.tensorboard import SummaryWriter
 from data.dataset import MedicalImageDataset
-from utils import mics
+from utils import misc
 from models.aeu import AEU
 from utils.engine import train_one_epoch,test_one_epoch
 
@@ -34,7 +32,6 @@ def train(config,args):
 
     print(f"Load dataset test...")
     dataset_test = MedicalImageDataset(config, mode="test")
-    print(dataset_test)
     dataloader_test = torch.utils.data.DataLoader(
         dataset_test,
         batch_size=args.batch_size,
@@ -49,10 +46,12 @@ def train(config,args):
     optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.5, 0.999)) for param_group in param_groups]
     print(optimizers)
     loss_scalers = [NativeScaler() for _ in range(args.num_model)]
-    auc_best = 0
+    auc_best = []
+    for i in  range(args.num_model):
+        auc_best.append([0])
     start = 0
     if args.resume:
-        start, auc_best = mics.load_model(args, models, optimizers, loss_scalers, best=False)
+        start, auc_best = misc.load_model(args, models, optimizers, loss_scalers, best=False)
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
 
@@ -68,11 +67,11 @@ def train(config,args):
         log_writer.add_scalars("Test/AUC", {f"Model_{i}": auc for i, auc in enumerate(test_stats["AUC"])}, epoch)
         log_writer.add_scalars("Test/AP", {f"Model_{i}": ap for i, ap in enumerate(test_stats["AP"])}, epoch)
 
-        auc_old = auc_best.copy()
+        auc_old = auc_best
         auc_best = [max(auc_best[i], test_stats['AUC'][i]) for i in range(args.num_model)]
         if auc_old != auc_best:
-            mics.save_model(args, epoch, models, optimizers, loss_scalers, auc_best=auc_best, auc_old=auc_old, best=True)
-        mics.save_model(args,epoch,models,optimizers,loss_scalers, auc_best, best=False)
+            misc.save_model(args, epoch, models, optimizers, loss_scalers, auc_best=auc_best, auc_old=auc_old, best=True)
+        misc.save_model(args,epoch,models,optimizers,loss_scalers, auc_best, best=False)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

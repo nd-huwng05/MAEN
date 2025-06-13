@@ -33,6 +33,11 @@ def train_one_epoch(models, dataloader_train, optimizers, loss_scalers, args, ep
                 x_recons.append(output['x_hat'])
                 log_vars.append(output['log_var'])
 
+        latents = latents.to(dtype=torch.float32)
+        log_vars = [lv.to(dtype=torch.float32) for lv in log_vars]
+        x_recons = [xr.to(dtype=torch.float32) for xr in x_recons]
+        features = [f.to(dtype=torch.float32) for f in features]
+
         loss = MAENLoss(alpha=1, beta=1, gamma=1)
         L_sim, L_org, L_total = loss(x_recons, features, latents, log_vars)
         for opt in optimizers:
@@ -53,10 +58,12 @@ def test_one_epoch(models, dataloader_test, args, epoch, log_writer):
     metric_logger = logger.MetricLogger(delimiter="  ")
     header = 'Testing epoch: [{}]'.format(epoch)
 
+
+    y_scores = [[] for _ in range(args.num_model)]
+    y_trues = [[] for _ in range(args.num_model)]
     with torch.no_grad():
         for images, label in metric_logger.log_every(dataloader_test, args.print_freq, header):
             x = images.to(args.device)
-            y_scores, y_trues = [], []
 
             for i in range(args.num_model):
                 output  = models[i](x)
@@ -65,11 +72,11 @@ def test_one_epoch(models, dataloader_test, args, epoch, log_writer):
                 res = torch.exp(-log_var)*rec_err
                 res = res.mean(dim=(1,2,3))
 
-                y_trues[i].append(label.cpu())
-                y_scores[i].append(res.cpu().view(-1))
+                y_trues[i].append(label.detach().cpu())
+                y_scores[i].append(res.detach().cpu().view(-1))
 
         y_trues = [np.concatenate(y_true) for y_true in y_trues]
-        y_scores = [np.concatenate(y_scores) for y_scores in y_scores]
+        y_scores = [np.concatenate(y_score) for y_score in y_scores]
         aucs = [roc_auc_score(y_trues[i], y_scores[i]) for i in range(args.num_model)]
         aps = [average_precision_score(y_trues[i], y_scores[i]) for i in range(args.num_model)]
 
@@ -78,9 +85,9 @@ def test_one_epoch(models, dataloader_test, args, epoch, log_writer):
         metric_logger.update(**auc_dict, **ap_dict)
         metric_logger.synchronize_between_processes()
 
-    print("Averaged stats:", metric_logger)
-    return {
-        **{k: meter.global_avg for k, meter in metric_logger.meters.items()},
-        "AUC": aucs,
-        "AP": aps,
-    }
+        print("Averaged stats:", metric_logger)
+        return {
+            **{k: meter.global_avg for k, meter in metric_logger.meters.items()},
+            "AUC": aucs,
+            "AP": aps,
+        }
