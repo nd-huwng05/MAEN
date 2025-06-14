@@ -26,5 +26,5 @@ class AEU(AE):
         x_hat, log_var = self.de_block4(de4).chunk(2, 1)
 
         return {'x_hat': x_hat, 'log_var': log_var, 'z': z,
-                'features': [en1, en2, en3, en4, z, de1, de2, de3,de4][self.layer]}
+                'features': [en1, en2, en3, en4, z, de1, de2, de3,de4][4]}
 

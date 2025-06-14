@@ -46,8 +46,33 @@ class CKA(object):
         var2 = torch.sqrt(self.kernel_HSIC(Y, Y, sigma))
         return hsic / (var1 * var2)
 
-    def forward(self, X, Y):
-        return self.linear_CKA(X.flatten(1), Y.flatten(1))
+    def forward(self, X, Y, group_size=2):
+        assert X.shape == Y.shape, "X and Y must have the same shape"
+
+        batch_size = X.shape[0]
+        num_full_groups = batch_size // group_size
+        remainder = batch_size % group_size
+
+        assert remainder != 1
+
+        total = 0.0
+        start = 0
+
+        for i in range(num_full_groups):
+            end = start + group_size
+            x_chunk = X[start:end].flatten(1)
+            y_chunk = Y[start:end].flatten(1)
+            total += self.linear_CKA(x_chunk, y_chunk)
+            start = end
+
+        # Gộp phần còn lại (nếu có)
+        if remainder > 0:
+            x_chunk = X[start:].flatten(1)
+            y_chunk = Y[start:].flatten(1)
+            total += self.linear_CKA(x_chunk, y_chunk)
+
+        return total
+
 
 
 class ReconstructionLoss(nn.Module):
@@ -55,10 +80,9 @@ class ReconstructionLoss(nn.Module):
         super().__init__()
 
     def forward(self, Y, Y_rec):
-        return torch.mean((Y - Y_rec) ** 2)
+        return torch.mean((Y - Y_rec)**2, dim=-1)
 
-
-class MAENLoss(nn.Module):
+class AEULoss(nn.Module):
     def __init__(self, alpha=1, beta=1, gamma=1 ,args=None):
         super().__init__()
         self.alpha = alpha
@@ -69,27 +93,66 @@ class MAENLoss(nn.Module):
         self.recon = ReconstructionLoss()
 
     def sim(self, features):
-        loss = []
+        loss = 0
         for idx in range(len(features)):
             for i in range(idx + 1, len(features)):
-                loss.append(self.cka.forward(features[idx], features[i]))
-        return torch.mean(torch.stack(loss), dim=0)
+                loss += self.cka.forward(features[idx], features[i])
+        return loss
 
     def rec_loss(self, image, recs, log_vars):
         loss = 0
         for i in range(len(recs)):
-            rec = self.recon(image, recs[i])
-            loss += torch.mean(torch.exp(-log_vars[i] * rec))
-        return loss
-
-    def log_loss(self, log_vars):
-        loss = 0
-        for i in range(len(log_vars)):
-            loss += torch.mean(log_vars[i])
-        return loss
+            rec = sum(self.recon(image, recs[i]))
+            loss += rec
+        return torch.mean(loss)
 
     def forward(self, x_recons, features, image, log_vars):
         L_sim = self.sim(features)
         L_rec = self.rec_loss(image, x_recons, log_vars)
-        L_log = self.log_loss(log_vars)
-        return L_sim, L_rec, L_sim*self.alpha + L_rec*self.beta + L_log*self.gamma
+        # L_log = self.log_loss(log_vars)
+        return L_sim, L_rec, L_sim*self.alpha + L_rec*self.beta
+
+class MAENLoss(nn.Module):
+    def __init__(self, alpha=1, beta=1 ,args=None):
+        super().__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.cka = CKA()
+        self.recon = ReconstructionLoss()
+
+    def sim(self, features):
+        loss = 0.0
+        for idx in range(len(features)):
+            for i in range(idx + 1, len(features)):
+                loss += self.cka.forward(features[idx], features[i], group_size=8)
+        return loss
+
+    def rec_loss(self, image, recs, mask):
+        loss = 0.0
+        for i in range(len(recs)):
+            rec = (self.recon(image, recs[i])*mask[i]).sum()/mask[i].sum()
+            loss += rec
+        return loss
+
+    def rec_loss_uncertainty(self, image, x_recons, log_vars, masks):
+        """
+        Heteroscedastic loss: exp(-log_var) * (x - x_hat)^2 + log_var
+        """
+        total_loss = 0.0
+        for i in range(len(x_recons)):
+            x_hat = x_recons[i]
+            log_var = log_vars[i]
+            mask = masks[i]
+            rec_err = (image - x_hat) ** 2
+            hetero_loss = torch.exp(-log_var) * rec_err + log_var
+            masked_loss = (hetero_loss * mask).sum() / mask.sum()
+            total_loss += masked_loss
+        return total_loss
+
+    def forward(self, x_recons, features, image, log_vars, masks, uncertainty = False):
+        L_sim = self.sim(features)
+        if uncertainty:
+            L_rec = self.rec_loss_uncertainty(image, x_recons, log_vars, masks)
+        else:
+            L_rec = self.rec_loss(image, x_recons, masks)
+        return L_sim, L_rec, L_sim*self.alpha + L_rec*self.beta

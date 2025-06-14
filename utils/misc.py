@@ -44,6 +44,6 @@ def load_model(args, models, optimizers, loss_scalers, best=False):
         loss_scalers[i].load_state_dict(checkpoint['scaler'])
         auc_best.append(checkpoint['AUC'])
         epoch = checkpoint['epoch']
-    return None if best else epoch, auc_best
+    return None if best else epoch + 1, auc_best
 
 

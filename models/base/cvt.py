@@ -1,8 +1,10 @@
 from collections.abc import Iterable
+from functools import partial
 from itertools import repeat
 import logging
 import os
 from collections import OrderedDict
+
 import numpy as np
 import scipy
 import torch
@@ -30,20 +32,6 @@ to_3tuple = _ntuple(3)
 to_4tuple = _ntuple(4)
 to_ntuple = _ntuple
 
-class MaskingNetwork(nn.Module):
-    def __init__(self, dim, hidden_dim=256):
-        super().__init__()
-        self.score_net = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, 1)  # Mỗi token ra một score
-        )
-
-    def forward(self, x):
-        # x: [B, L, C]
-        scores = self.score_net(x).squeeze(-1)  # [B, L]
-        return scores
 
 class LayerNorm(nn.LayerNorm):
     """Subclass torch's LayerNorm to handle fp16."""

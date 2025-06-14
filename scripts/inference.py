@@ -1,4 +1,6 @@
 import os
+import time
+
 import torch
 import tqdm
 import numpy as np
@@ -7,10 +9,10 @@ from sklearn import metrics
 from torch.autograd import Variable
 from timm.optim import optim_factory
 from timm.utils import NativeScaler
-from models.aeu import AEU
+from models.model_factory import AEU_Net, MAE_Net
 from data.dataset import MedicalImageDataset
 
-def inference(config, args):
+def inference(config, args, name):
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
     dataset_test = MedicalImageDataset(config, mode="test")
@@ -22,7 +24,10 @@ def inference(config, args):
         drop_last=False,
     )
 
-    models = [AEU(latent_size=args.ls, expansion=args.mp, input_size=args.image_size, layer=args.layer).to(device=args.device) for _ in range(args.num_model)]
+    if name == "AEU":
+        models = [AEU_Net(args).to(device=args.device) for _ in range(args.num_model)]
+    else:
+        models = [MAE_Net(args).to(device=args.device) for _ in range(args.num_model)]
     print("actual lr: %.2e" % args.lr)
     param_groups = [optim_factory.param_groups_weight_decay(model, args.weight_decay) for model in models]
     optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.5, 0.999)) for param_group in param_groups]
@@ -31,6 +36,7 @@ def inference(config, args):
     misc.load_model(args, models, optimizers, loss_scalers, best=True)
 
     print("=> Evaluating ... ")
+    time.sleep(1)
     for model in models:
         model.eval()
     y_true, unc_dis_l  = [],[]
@@ -39,16 +45,13 @@ def inference(config, args):
         grad_recs, unc = [], []
         for model in models:
             out = model(x)
-
             mean, logvar = out["x_hat"], out["log_var"]
             rec_err = (x - mean) ** 2
             loss = torch.mean(torch.exp(-logvar) * rec_err)
             gradient = torch.autograd.grad(torch.mean(loss), x)[0].squeeze(0)
             grad_rec = torch.abs(mean - x) * gradient
-
-            grad_recs.append(grad_rec)
             unc.append(torch.exp(logvar).squeeze(0))
-
+            grad_recs.append(grad_rec)
         grad_recs = torch.cat(grad_recs)
         unc = torch.cat(unc)
 

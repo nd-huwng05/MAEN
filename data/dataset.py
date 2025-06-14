@@ -70,7 +70,7 @@ if __name__ == "__main__":
     config["dataset"]["path"] = "VinCXR/images"
     transforms = transforms.Compose([])
 
-    dataset = MedicalImageDataset(config, mode="train", transform=transforms, abnormal_ratio=0.2)
+    dataset = MedicalImageDataset(config, mode="train", transform=transforms)
     print(f"Sum images in dataset: {len(dataset)}")
     image, label = dataset[12]
     plt.imshow(image)
