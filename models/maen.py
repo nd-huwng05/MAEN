@@ -102,15 +102,17 @@ class MAEN(nn.Module):
         return x_masked, mask, ids_restore
 
     def forward_encoder(self, x, mask_ratio):
+        cls_tokens = []
         x = self.patch_embed(x)
         x, mask, ids_restore = self.masking(x, mask_ratio)
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_token, x), dim=1)
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             x = blk(x, self.masked_H, self.masked_W)
+            if i != self.depth - 1: cls_tokens.append(x[:, 0])
         x = self.norm(x)
-        cls_token = x[:, 0]
-        return x, mask, ids_restore, cls_token
+        cls_tokens = torch.cat(cls_tokens, dim=1)
+        return x, mask, ids_restore, cls_tokens
 
     def forward_decoder(self, x, ids_restore):
         x = self.decoder_embed(x)
@@ -123,17 +125,14 @@ class MAEN(nn.Module):
         x = self.decoder_norm(x)
         x = x[:, 1:, :]
         x_hat = self.decoder_pred(x)
-        log_var = self.decoder_pred_var(x)
-        return x_hat, log_var
+        return x_hat
 
     def forward(self, img, mask_ratio=0.5):
-        x, mask, ids_restore, cls_token = self.forward_encoder(img, mask_ratio)
+        x, mask, ids_restore, cls_tokens = self.forward_encoder(img, mask_ratio)
         x, log_var = self.forward_decoder(x, ids_restore)
+        img = self.patchify(img)
         if self.training:
-            log_var = self.unpatchify(log_var)
-            x = self.unpatchify(x)
-            return {'x_hat': x, 'log_var': log_var, 'z': cls_token,
-                    'features': cls_token, 'mask': mask}
+            return {'x_hat': x, 'img': img, 'features': cls_tokens, 'mask': mask}
         else:
             img = self.patchify(img)
-            return {'x_hat': x, 'log_var': log_var, 'img': img, 'mask': mask}
+            return {'x_hat': x, 'img': img, 'mask': mask}

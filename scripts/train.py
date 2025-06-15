@@ -8,8 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 from data.dataset import MedicalImageDataset
 from utils import misc
 from utils.engine import train_one_epoch,test_one_epoch
-from models.model_factory import AEU_Net, MAE_Net
-from utils.losses import AEULoss, MAENLoss
+from models.model_factory import MAE_Net
+
 
 
 def train(config,args, name):
@@ -40,17 +40,9 @@ def train(config,args, name):
         pin_memory=args.pin_mem,
         drop_last=False,
     )
-    if name == "AEU":
-        models = [AEU_Net(args).to(device=args.device) for _ in range(args.num_model)]
-        loss = AEULoss(alpha=1, beta=1, gamma=1)
-    elif name == "MAE":
-        models = [MAE_Net(args).to(device=args.device) for _ in range(args.num_model)]
-        loss = MAENLoss(alpha=1, beta=1)
-    else:
-        raise NotImplementedError
+    models = [MAE_Net(args).to(device=args.device) for _ in range(args.num_model)]
     print("actual lr: %.2e" % args.lr)
-    param_groups = [optim_factory.param_groups_weight_decay(model, args.weight_decay) for model in models]
-    optimizers = [torch.optim.AdamW(param_group, lr=args.lr, betas=(0.5, 0.999)) for param_group in param_groups]
+    optimizers = [torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.5, 0.999)) for model in models]
     print(optimizers)
     loss_scalers = [NativeScaler() for _ in range(args.num_model)]
     auc_best = []

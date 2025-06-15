@@ -1,11 +1,6 @@
-from models.aeu import AEU
 from models.maen import MAEN
 from functools import partial
 import torch.nn as nn
-
-def AEU_Net(args):
-    model = AEU(latent_size=args.ls, expansion=args.mp, input_size=args.image_size, layer=args.layer)
-    return model
 
 def MAE_Net(args):
     model = MAEN(patch_size=16, embed_dim=256, depth=3, num_heads=4,
